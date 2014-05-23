@@ -125,10 +125,10 @@ namespace DarkAutumn.Twitch
 
     internal class SafeLineReader
     {
-        TextReader m_reader;
+        StreamReader m_reader;
         StringBuilder m_curr = new StringBuilder(1024);
 
-        public SafeLineReader(TextReader textReader)
+        public SafeLineReader(StreamReader textReader)
         {
             m_reader = textReader;
         }
@@ -138,12 +138,22 @@ namespace DarkAutumn.Twitch
         {
             int nextChar;
 
+            bool first = true;
+
             while (true)
             {
                 // Check whether to stop reading characters.
                 nextChar = m_reader.Peek();
                 if (nextChar == -1)
+                {
+                    if (first)
+                    {
+                        first = false;
+                        m_reader.DiscardBufferedData();
+                        continue;
+                    }
                     break;
+                }
 
                 if (nextChar == '\r' || nextChar == '\n')
                 {
