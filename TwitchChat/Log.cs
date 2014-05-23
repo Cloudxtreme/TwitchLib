@@ -40,12 +40,11 @@ namespace DarkAutumn.Twitch
             }
         }
 
-        public void LogBytesReceived(byte[] bytes, int len)
+        public void LogBytesReceived(int len)
         {
             lock (m_file)
             {
-                string s = Encoding.UTF8.GetString(bytes, 0, len);
-                m_file.WriteLine("[{0}, t={1}] bytes {2}: {3}", DateTime.Now, Thread.CurrentThread.ManagedThreadId, len, s);
+                m_file.WriteLine("[{0}, t={1}] bytes {2}", DateTime.Now, Thread.CurrentThread.ManagedThreadId, len);
                 m_file.Flush();
             }
         }
