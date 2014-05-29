@@ -10,16 +10,23 @@ namespace DarkAutumn.Twitch
 {
     public class TwitchChannel
     {
+        readonly string r_ban = ".ban ";
+        readonly string r_timeout = ".timeout ";
         readonly string r_action = new string((char)1, 1) + "ACTION";
+
         TwitchConnection m_twitch;
 
         HashSet<TwitchUser> m_moderators = new HashSet<TwitchUser>();
         Dictionary<string, TwitchUser> m_users = new Dictionary<string, TwitchUser>();
+        string m_prvtMsg;
 
         public delegate void ChannelEventHandler(TwitchChannel channel);
         public delegate void UserEventHandler(TwitchChannel channel, TwitchUser user);
         public delegate void MessageHandler(TwitchChannel channel, TwitchUser user, string text);
         public delegate void SlowModeHandler(TwitchChannel channel, int time);
+        public delegate void StatusMessageHandler(TwitchChannel channel, string text);
+
+        public event StatusMessageHandler StatusMessageReceived;
 
         public event SlowModeHandler SlowModeBegin;
         public event ChannelEventHandler SlowModeEnd;
@@ -37,6 +44,8 @@ namespace DarkAutumn.Twitch
 
         public event UserEventHandler UserChatCleared;
         public event ChannelEventHandler ChatCleared;
+
+        public event MessageHandler MessageSent;
 
         public TwitchUser[] Moderators
         {
@@ -56,12 +65,68 @@ namespace DarkAutumn.Twitch
         {
             m_twitch = twitch;
             Name = channel;
+            m_prvtMsg = string.Format("PRIVMSG #{0} :", channel);
         }
 
         public override string ToString()
         {
             return Name;
         }
+
+        public void SendMessage(string message)
+        {
+            SendMessage(message, null);
+        }
+
+        public void SendMessage(string format, params object[] parameters)
+        {
+            int paramCount = parameters != null ? parameters.Length : 0;
+
+            StringBuilder sb = new StringBuilder(m_prvtMsg.Length + format.Length + paramCount * 8 + 1);
+            sb.Append(m_prvtMsg);
+
+            if (paramCount == 0)
+                sb.Append(format);
+            else
+                sb.AppendFormat(format, parameters);
+
+            sb.Append('\n');
+
+            string message = sb.ToString();
+            m_twitch.Send(message);
+
+            var evt = MessageSent;
+            if (evt != null)
+                evt(this, GetUser(m_twitch.User), message);
+        }
+
+        public void Ban(TwitchUser user)
+        {
+            StringBuilder sb = new StringBuilder(m_prvtMsg.Length + r_ban.Length + user.Name.Length + 1);
+            sb.Append(m_prvtMsg);
+            sb.Append(r_ban);
+            sb.Append(user.Name);
+            sb.Append('\n');
+
+            m_twitch.Send(sb.ToString());
+        }
+
+        public void Timeout(TwitchUser user, int duration)
+        {
+            if (duration <= 0)
+                throw new ArgumentException("duration must be 1 or greater");
+
+            StringBuilder sb = new StringBuilder(m_prvtMsg.Length + r_timeout.Length + user.Name.Length + 8);
+            sb.Append(m_prvtMsg);
+            sb.Append(r_timeout);
+            sb.Append(user.Name);
+            sb.Append(' ');
+            sb.Append(duration);
+            sb.Append('\n');
+
+            m_twitch.Send(sb.ToString());
+        }
+
 
         public TwitchUser GetUser(string name)
         {
@@ -92,9 +157,9 @@ namespace DarkAutumn.Twitch
             Debug.Assert(offset < line.Length);
 
             // Twitchnotify is how subscriber messages "Soandso just subscribed!" comes in:
-            TwitchUser user;
             if (username == "twitchnotify")
             {
+                TwitchUser user;
                 int i = line.IndexOf(" just", offset);
                 if (i > 0)
                 {
@@ -110,18 +175,17 @@ namespace DarkAutumn.Twitch
                 }
             }
 
-            user = GetUser(username);
             if (line.StartsWith(r_action, offset))
             {
                 var evt = ActionReceived;
                 if (evt != null)
-                    evt(this, user, line.Substring(offset));
+                    evt(this, GetUser(username), line.Substring(offset));
             }
             else
             {
                 var evt = MessageReceived;
                 if (evt != null)
-                    evt(this, user, line.Substring(offset));
+                    evt(this, GetUser(username), line.Substring(offset));
             }
         }
 
@@ -158,7 +222,10 @@ namespace DarkAutumn.Twitch
             string chatclear = "CLEARCHAT";
 
             if (!text.StartsWith(chatclear, offset))
+            {
+                Debug.Fail(string.Format("ParseChatClear failed to parse {0}", text));
                 return;
+            }
 
             offset += chatclear.Length;
 
@@ -182,7 +249,9 @@ namespace DarkAutumn.Twitch
 
         internal void RawJtvMessage(string text, int offset)
         {
-            text = text.Substring(offset);
+            var evt = StatusMessageReceived;
+            if (evt != null)
+                evt(this, text.Substring(offset));
         }
 
         internal void NotifyModeratorJoined(string user)
@@ -207,11 +276,17 @@ namespace DarkAutumn.Twitch
 
             int i = text.IndexOf(' ', offset);
             if (i == -1)
+            {
+                Debug.Fail(string.Format("ParseSlowMode failed to parse {0}", text));
                 return;
+            }
 
             int time;
             if (!int.TryParse(text, out time))
+            {
+                Debug.Fail(string.Format("ParseSlowMode failed to parse {0}", text));
                 return;
+            }
 
             evt(this, time);
         }

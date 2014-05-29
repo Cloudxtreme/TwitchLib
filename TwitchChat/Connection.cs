@@ -16,6 +16,9 @@ namespace DarkAutumn.Twitch
 
         volatile TwitchUserData m_lastUser;
 
+
+        public string User { get; private set; }
+
         public TwitchConnection()
         {
             m_irc = new IrcConnection(this);
@@ -50,6 +53,11 @@ namespace DarkAutumn.Twitch
             m_irc.Part("#" + name);
         }
 
+        internal void Send(string message)
+        {
+            m_irc.Send(message);
+        }
+
         public TwitchChannel Join(string channel)
         {
             if (string.IsNullOrEmpty(channel) || channel[0] == '#')
@@ -69,6 +77,22 @@ namespace DarkAutumn.Twitch
 
             m_irc.Join("#" + channel);
             return twitchChannel;
+        }
+
+        public async Task<TwitchChannel> JoinAsync(string channel)
+        {
+            TwitchChannel result = Join(channel);
+
+            if (result.Connected)
+                return result;
+
+            await Task.Factory.StartNew(() =>
+                {
+                    while (!result.Connected)
+                        Task.Delay(150);
+                });
+
+            return result;
         }
 
 
@@ -109,6 +133,7 @@ namespace DarkAutumn.Twitch
 
         public async Task<ConnectResult> ConnectAsync(string user, string oauth)
         {
+            User = user;
             return await m_irc.ConnectAsync("irc.twitch.tv", 6667, user, oauth);
         }
 
@@ -221,7 +246,10 @@ namespace DarkAutumn.Twitch
 
             string specialuser = "SPECIALUSER ";
             if (!text.StartsWith(specialuser, offset))
+            {
+                Debug.Fail("ParseSpecialUser received unexpected string start.");
                 return;
+            }
 
             offset += specialuser.Length;
 
@@ -231,7 +259,10 @@ namespace DarkAutumn.Twitch
             if (text.EndsWith("subscriber"))
             {
                 if (chan == null)
+                {
+                    Debug.Fail("Subscriber message sent to non-channel.");
                     return;
+                }
 
                 var user = chan.GetUser(name);
                 user.IsSubscriber = true;
@@ -248,7 +279,7 @@ namespace DarkAutumn.Twitch
             }
             else
             {
-                Debugger.Break();
+                Debug.Fail(string.Format("Parse SpecialMessage could not parse {0}", text));
             }
         }
 
@@ -259,15 +290,24 @@ namespace DarkAutumn.Twitch
 
             string usercolor = "USERCOLOR ";
             if (!text.StartsWith(usercolor, offset))
+            {
+                Debug.Fail(string.Format("Could not parse user color {0}", text));
                 return;
+            }
 
             offset += usercolor.Length;
             if (offset + 3 >= text.Length)
+            {
+                Debug.Fail(string.Format("Could not parse user color {0}", text));
                 return;
+            }
 
             int i = text.IndexOf(' ', offset);
             if (text[i + 1] != '#')
+            {
+                Debug.Fail(string.Format("Could not parse user color {0}", text));
                 return;
+            }
 
             var user = GetUserData(text.Slice(offset, i));
             user.Color = text.Substring(i + 1);
@@ -277,19 +317,28 @@ namespace DarkAutumn.Twitch
         {
             string emoteset = "EMOTESET ";
             if (!text.StartsWith(emoteset, offset))
+            {
+                Debug.Fail(string.Format("Could not parse emote set {0}", text));
                 return;
+            }
 
             offset += emoteset.Length;
             int i = text.IndexOf(' ', offset);
             if (i == -1)
+            {
+                Debug.Fail(string.Format("Could not parse emote set {0}", text));
                 return;
+            }
 
             var user = GetUserData(text.Slice(offset, i));
             if (user.ImageSet != null)
                 return;
 
             if (text[i + 1] != '[' || text[text.Length - 1] != ']')
+            {
+                Debug.Fail(string.Format("Could not parse emote set {0}", text));
                 return;
+            }
 
             string items = text.Slice(i + 2, text.Length - 1);
 

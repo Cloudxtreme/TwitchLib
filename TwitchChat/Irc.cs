@@ -116,22 +116,30 @@ namespace DarkAutumn.Twitch
 
         private void ReceiveCallback(IAsyncResult ar)
         {
-            int read = m_socket.EndReceive(ar);
-            Log.Instance.LogBytesReceived(read);
-
-            if (read > 0)
+            try
             {
-                m_stream.Write(m_buffer, 0, read);
+                int read = m_socket.EndReceive(ar);
+                Log.Instance.LogBytesReceived(read);
 
-                string line;
-                List<string> result = new List<string>();
-                while ((line = m_reader.ReadLine()) != null)
+                if (read > 0)
                 {
-                    Log.Instance.LogRecv(line);
-                    m_queue.Add(line);
+                    m_stream.Write(m_buffer, 0, read);
+
+                    string line;
+                    List<string> result = new List<string>();
+                    while ((line = m_reader.ReadLine()) != null)
+                    {
+                        Log.Instance.LogRecv(line);
+                        m_queue.Add(line);
+                    }
+
+                    ReceiveAsync();
                 }
-                
-                ReceiveAsync();
+            }
+            catch (SocketException e)
+            {
+                Log.Instance.LogError(e.ToString());
+                Debug.Fail(e.ToString());
             }
         }
 
@@ -391,6 +399,11 @@ namespace DarkAutumn.Twitch
             Debug.Assert(channel == channel.ToLower());
 
             SendAsync("PART {0}\n", channel);
+        }
+
+        internal void Send(string message)
+        {
+            SendAsync(message);
         }
     }
 }
