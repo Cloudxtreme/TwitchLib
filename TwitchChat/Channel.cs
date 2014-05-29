@@ -19,6 +19,13 @@ namespace DarkAutumn.Twitch
         public delegate void ChannelEventHandler(TwitchChannel channel);
         public delegate void UserEventHandler(TwitchChannel channel, TwitchUser user);
         public delegate void MessageHandler(TwitchChannel channel, TwitchUser user, string text);
+        public delegate void SlowModeHandler(TwitchChannel channel, int time);
+
+        public event SlowModeHandler SlowModeBegin;
+        public event ChannelEventHandler SlowModeEnd;
+
+        public event ChannelEventHandler SubModeBegin;
+        public event ChannelEventHandler SubModeEnd;
 
         public event MessageHandler MessageReceived;
         public event MessageHandler ActionReceived;
@@ -31,8 +38,7 @@ namespace DarkAutumn.Twitch
         public event UserEventHandler UserChatCleared;
         public event ChannelEventHandler ChatCleared;
 
-
-        public TwitchUser[] Users
+        public TwitchUser[] Moderators
         {
             get
             {
@@ -50,6 +56,11 @@ namespace DarkAutumn.Twitch
         {
             m_twitch = twitch;
             Name = channel;
+        }
+
+        public override string ToString()
+        {
+            return Name;
         }
 
         public TwitchUser GetUser(string name)
@@ -121,17 +132,11 @@ namespace DarkAutumn.Twitch
             // This room is now in slow mode. You may send messages every 120 seconds
             //*  The moderators of this room are: mod1, mod2, mod3
 
-            string modMsg = "The moderators of this room are: ";
-            if (!text.StartsWith(modMsg, offset))
-                return;
-
-            offset += modMsg.Length;
-
             lock (m_moderators)
             {
                 TwitchUser streamer = GetUser(Name);
 
-                string[] modList = text.Substring(modMsg.Length).Split(new string[] { ", " }, StringSplitOptions.RemoveEmptyEntries);
+                string[] modList = text.Substring(offset).Split(new string[] { ", " }, StringSplitOptions.RemoveEmptyEntries);
                 HashSet<TwitchUser> mods = new HashSet<TwitchUser>(modList.Select(name => GetUser(name)));
                 mods.Add(streamer);
 
@@ -192,6 +197,44 @@ namespace DarkAutumn.Twitch
             var evt = ModeratorLeft;
             if (evt != null)
                 evt(this, GetUser(user));
+        }
+
+        internal void ParseSlowMode(string text, int offset)
+        {
+            var evt = SlowModeBegin;
+            if (evt == null)
+                return;
+
+            int i = text.IndexOf(' ', offset);
+            if (i == -1)
+                return;
+
+            int time;
+            if (!int.TryParse(text, out time))
+                return;
+
+            evt(this, time);
+        }
+
+        internal void SlowOff()
+        {
+            var evt = SlowModeEnd;
+            if (evt != null)
+                evt(this);
+        }
+
+        internal void SubMode()
+        {
+            var evt = SubModeBegin;
+            if (evt != null)
+                evt(this);
+        }
+
+        internal void SubModeOff()
+        {
+            var evt = SubModeEnd;
+            if (evt != null)
+                evt(this);
         }
     }
 }

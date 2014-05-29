@@ -180,8 +180,22 @@ namespace DarkAutumn.Twitch
 
                 case 'T':
                     Debug.Assert(chan != null);
-                    if (text.StartsWith("The moderators of this room are:", offset))
-                        chan.ParseModerators(text, offset);
+                    string modMsg = "The moderators of this room are: ";
+                    string slowMode = "This room is now in slow mode. You may send messages every ";
+                    string slowOff = "This room is no longer in slow mode.";
+                    string subMode = "This room is now in subscribers-only mode.";
+                    string subModeOff = "This room is no longer in subscribers-only mode.";
+
+                    if (text.StartsWith(modMsg, offset))
+                        chan.ParseModerators(text, offset + modMsg.Length);
+                    else if (text.StartsWith(slowMode, offset))
+                        chan.ParseSlowMode(slowMode, offset + slowMode.Length);
+                    else if (text.StartsWith(slowOff, offset))
+                        chan.SlowOff();
+                    else if (text.StartsWith(subMode, offset))
+                        chan.SubMode();
+                    else if (text.StartsWith(subModeOff, offset))
+                        chan.SubModeOff();
                     else
                         chan.RawJtvMessage(text, offset);
                     break;
