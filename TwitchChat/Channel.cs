@@ -80,6 +80,9 @@ namespace DarkAutumn.Twitch
 
         public void SendMessage(string format, params object[] parameters)
         {
+            if (format.Length == 0)
+                return;
+
             int paramCount = parameters != null ? parameters.Length : 0;
 
             StringBuilder sb = new StringBuilder(m_prvtMsg.Length + format.Length + paramCount * 8 + 1);
@@ -96,7 +99,7 @@ namespace DarkAutumn.Twitch
             m_twitch.Send(message);
 
             var evt = MessageSent;
-            if (evt != null)
+            if (evt != null && format[0] != '.')
                 evt(this, GetUser(m_twitch.User), message);
         }
 
