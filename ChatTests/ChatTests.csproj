@@ -54,7 +54,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\TwitchChat\TwitchChat.csproj">
+    <ProjectReference Include="..\TwitchLib\TwitchLib.csproj">
       <Project>{0b42506f-df87-4dc1-ad54-edb41b24fbc5}</Project>
       <Name>TwitchChat</Name>
     </ProjectReference>
