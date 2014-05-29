@@ -19,18 +19,19 @@ namespace DarkAutumn.Twitch
         LoginFailed
     }
 
-    public class IrcConnection
+    class IrcConnection
     {
         bool m_connected;
         Socket m_socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         DnsEndPoint m_endpoint;
         string m_user, m_oauth;
         Encoding m_encoding = Encoding.UTF8;
+        volatile bool m_shutdown = false;
 
         byte[] m_buffer = new byte[1024];
         Stream m_stream = new CircularBufferStream(0x10000);
 
-        Action<TwitchConnection> m_connectCallback;
+        TaskCompletionSource<ConnectResult> m_connectResult;
 
         TwitchConnection m_twitch;
 
@@ -39,6 +40,7 @@ namespace DarkAutumn.Twitch
         Thread m_thread;
 
         SafeLineReader m_reader;
+        public static Action<TwitchChannel> s_chanCreated;
 
         public IrcConnection(TwitchConnection twitch)
         {
@@ -46,39 +48,44 @@ namespace DarkAutumn.Twitch
             m_twitch = twitch;
         }
 
-        public void ConnectAsync(string hostName, int port, string user, string oauth, Action<TwitchConnection> callback)
+        public Task<ConnectResult> ConnectAsync(string hostName, int port, string user, string oauth)
         {
             if (m_connected)
                 throw new InvalidOperationException("Already connected to twitch chat.");
-
-            m_connectCallback = callback;
 
             m_endpoint = new DnsEndPoint(hostName, port);
             m_user = user;
             m_oauth = oauth;
 
-            var args = new SocketAsyncEventArgs();
-            args.RemoteEndPoint = m_endpoint;
-            args.Completed += ConnectionCompleted;
-            
-            if (!m_socket.ConnectAsync(args))
-                ((EventHandler<SocketAsyncEventArgs>)ConnectionCompleted).BeginInvoke(this, args, null, null);
-        }
+            var taskCompletion = new TaskCompletionSource<ConnectResult>();
 
-        private void ConnectionCompleted(object sender, SocketAsyncEventArgs e)
-        {
-            if (m_connected)
-                throw new InvalidOperationException("Already connected to twitch chat.");
+            m_socket.BeginConnect(m_endpoint, asyncResult =>
+                {
+                    try
+                    {
+                        m_connected = true;
+                        if (m_thread == null)
+                        {
+                            m_thread = new Thread(ProcessMessages);
+                            m_thread.Name = "Message Processor for User " + m_user;
+                            m_thread.Start();
+                        }
 
-            m_connected = true;
-            m_thread = new Thread(ProcessMessages);
-            m_thread.Name = "Message Processor for User " + m_user;
+                        string login = "PASS :{1}\nUSER {0} 0 * :{0}\nNICK :{0}\nTWITCHCLIENT 3\n";
+                        login = string.Format(login, m_user, m_oauth);
 
-            string login = "PASS :{1}\nUSER {0} 0 * :{0}\nNICK :{0}\nTWITCHCLIENT 3\n";
-            login = string.Format(login, m_user, m_oauth);
+                        m_connectResult = taskCompletion;
 
-            SendAsync(login);
-            ReceiveAsync();
+                        SendAsync(login);
+                        ReceiveAsync();
+                    }
+                    catch (Exception e)
+                    {
+                        taskCompletion.TrySetException(e);
+                    }
+                }, null);
+
+            return taskCompletion.Task;
         }
 
         private void SendAsync(string value)
@@ -110,7 +117,7 @@ namespace DarkAutumn.Twitch
         private void ReceiveCallback(IAsyncResult ar)
         {
             int read = m_socket.EndReceive(ar);
-            Log.Instance.LogBytesReceived(m_buffer, read);
+            Log.Instance.LogBytesReceived(read);
 
             if (read > 0)
             {
@@ -130,7 +137,7 @@ namespace DarkAutumn.Twitch
 
         private void ProcessMessages()
         {
-            while (true)
+            while (!m_shutdown)
             {
                 string line = m_queue.Take();
 
@@ -149,6 +156,37 @@ namespace DarkAutumn.Twitch
                     ReportError(line);
                 }
             }
+        }
+
+        public static IEnumerable<string> TestInput(IEnumerable<string> lines, Action<TwitchChannel> chanCreated)
+        {
+            s_chanCreated = chanCreated;
+
+            List<string> errors = new List<string>();
+
+            TwitchConnection twitch = new TwitchConnection();
+            IrcConnection conn = new IrcConnection(twitch);
+            
+            foreach (var line in lines)
+            {
+                int userStart;
+                int userEnd;
+                string command;
+                int args;
+
+                if (ParseLine(line, out userStart, out userEnd, out command, out args))
+                {
+                    if (!conn.ProcessCommand(line, userStart, userEnd, command, args))
+                        errors.Add(line);
+                }
+                else
+                {
+                    errors.Add(line);
+                }
+            }
+
+            s_chanCreated = null;
+            return errors;
         }
 
         public static bool ParseLine(string line, out int userStart, out int userEnd, out string command, out int args)
@@ -176,7 +214,7 @@ namespace DarkAutumn.Twitch
                 return false;
 
             string server = "tmi.twitch.tv";
-            if (line.StartsWith(curr, server))
+            if (line.StartsWith(server, curr))
                 curr += server.Length + 1;
 
             int commandStart = curr;
@@ -194,6 +232,18 @@ namespace DarkAutumn.Twitch
         {
             switch (command)
             {
+                case "NOTICE":
+                    if (m_connectResult != null && line.EndsWith(":Login unsuccessful", StringComparison.CurrentCultureIgnoreCase))
+                    {
+                        m_connectResult.SetResult(ConnectResult.LoginFailed);
+                        m_connectResult = null;
+
+                        return true;
+                    }
+                    
+                    return false;
+
+
                 case "PRIVMSG":
                     if (line.StartsWith(":jtv!"))
                         return OnMessage("jtv", line, args);
@@ -209,14 +259,18 @@ namespace DarkAutumn.Twitch
                     return true;
 
                 case "JOIN":
-                    OnJoin(line.Substring(args+1));
+                    m_twitch.NotifyJoined(line.Substring(args + 1));
+                    return true;
+
+                case "PART":
+                    m_twitch.NotifyPart(line.Substring(args + 1));
                     return true;
 
                 case "001":
-                    if (m_connectCallback != null)
-                        m_connectCallback(m_twitch);
+                    if (m_connectResult != null)
+                        m_connectResult.SetResult(ConnectResult.Connected);
 
-                    m_connectCallback = null;
+                    m_connectResult = null;
                     return true;
 
 
@@ -248,15 +302,10 @@ namespace DarkAutumn.Twitch
             if (line[args] == '#')
                 channel = line.Slice(args+1, i);
 
-            string text = line.Substring(i + 1);
-            m_twitch.NotifyMessageReceived(channel, user, text);
+            m_twitch.NotifyMessageReceived(channel, user, line, i + 1);
             return true;
         }
 
-        private void OnJoin(string channel)
-        {
-            m_twitch.NotifyJoined(channel);
-        }
 
         private bool OnMode(string line, int args)
         {
@@ -277,7 +326,7 @@ namespace DarkAutumn.Twitch
                 return false;
 
             bool joined = line[i] == '+';
-            if (line[i] != '-')
+            if (!joined && line[i] != '-')
                 return false;
 
             string user = line.Substring(i + 3);
@@ -325,7 +374,23 @@ namespace DarkAutumn.Twitch
 
         internal void Join(string channel)
         {
+            Debug.Assert(channel == channel.ToLower());
+
             SendAsync("JOIN {0}\n", channel);
+        }
+
+        internal void Quit()
+        {
+            SendAsync("QUIT\n");
+
+            m_shutdown = true;
+        }
+
+        internal void Part(string channel)
+        {
+            Debug.Assert(channel == channel.ToLower());
+
+            SendAsync("PART {0}\n", channel);
         }
     }
 }

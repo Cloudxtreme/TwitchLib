@@ -8,7 +8,7 @@ namespace DarkAutumn.Twitch
 {
     public static class Extensions
     {
-        public static bool StartsWith(this string line, int curr, string value)
+        public static bool StartsWith(this string line, string value, int curr)
         {
             if (line.Length + curr < value.Length)
                 return false;
