@@ -100,12 +100,12 @@ namespace DarkAutumn.Twitch
         {
             TwitchChannel result = Create(channel);
 
-            if (result.Connected)
+            if (result.IsJoined)
                 return;
 
             await Task.Factory.StartNew(() =>
                 {
-                    while (!result.Connected)
+                    while (!result.IsJoined)
                         Thread.Sleep(150);
                 });
         }
@@ -162,7 +162,7 @@ namespace DarkAutumn.Twitch
             Debug.Assert(twitchChannel != null);
 
             if (twitchChannel != null)
-                twitchChannel.Connected = true;
+                twitchChannel.NotifyJoined();
         }
 
         internal void NotifyPart(string channel)
@@ -176,7 +176,7 @@ namespace DarkAutumn.Twitch
                     return;
                 }
 
-                twitchChannel.Connected = false;
+                twitchChannel.IsJoined = false;
                 m_channels.Remove(channel);
             }
         }

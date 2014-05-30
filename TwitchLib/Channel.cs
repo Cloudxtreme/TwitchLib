@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace DarkAutumn.Twitch
@@ -14,6 +15,8 @@ namespace DarkAutumn.Twitch
         readonly string r_ban = ".ban ";
         readonly string r_timeout = ".timeout ";
         readonly string r_action = new string((char)1, 1) + "ACTION";
+
+        ManualResetEvent m_joined = new ManualResetEvent(false);
 
         TwitchConnection m_twitch;
 
@@ -59,7 +62,7 @@ namespace DarkAutumn.Twitch
 
         public TwitchConnection Connection { get { return m_twitch; } }
 
-        public bool Connected { get; internal set; }
+        public bool IsJoined { get; internal set; }
         public string Name { get; private set; }
 
         internal TwitchChannel(TwitchConnection twitch, string channel)
@@ -167,14 +170,35 @@ namespace DarkAutumn.Twitch
 
         public void Join()
         {
+            if (IsJoined)
+                throw new InvalidOperationException("Channel already joined.");
+            
+            m_joined.Reset();
             m_twitch.Join("#" + Name);
+            m_joined.WaitOne();
+        }
+
+        public async Task JoinAsync()
+        {
+            if (IsJoined)
+                throw new InvalidOperationException("Channel already joined.");
+
+            m_joined.Reset();
+            m_twitch.Join("#" + Name);
+            await m_joined.AsTask();
         }
 
         public void Leave()
         {
             m_twitch.Leave(Name);
             m_twitch = null;
-            Connected = false;
+            IsJoined = false;
+        }
+
+        internal void NotifyJoined()
+        {
+            IsJoined = true;
+            m_joined.Set();
         }
 
         internal void NotifyMessageReceived(string username, string line, int offset)
