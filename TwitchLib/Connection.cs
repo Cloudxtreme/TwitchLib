@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
 
 namespace DarkAutumn.Twitch
 {
@@ -16,6 +17,10 @@ namespace DarkAutumn.Twitch
 
         volatile TwitchUserData m_lastUser;
 
+        public delegate void ChannelCreatedHandler(TwitchConnection connection, TwitchChannel channel);
+        public event ChannelCreatedHandler ChannelCreated;
+
+        public DateTime LastEvent { get { return m_irc.LastEvent; } }
 
         public string User { get; private set; }
 
@@ -42,10 +47,17 @@ namespace DarkAutumn.Twitch
             }
         }
 
-        public void Disconnect()
+        public void Quit()
         {
-            m_irc.Quit();
+            m_irc.Disconnect();
         }
+
+
+        public void Ping()
+        {
+            m_irc.Ping();
+        }
+
 
 
         internal void Leave(string name)
@@ -58,7 +70,13 @@ namespace DarkAutumn.Twitch
             m_irc.Send(message);
         }
 
-        public TwitchChannel Join(string channel)
+
+        internal void Join(string name)
+        {
+            m_irc.Join(name);
+        }
+
+        public TwitchChannel Create(string channel)
         {
             if (string.IsNullOrEmpty(channel) || channel[0] == '#')
                 throw new ArgumentException("channel");
@@ -75,24 +93,21 @@ namespace DarkAutumn.Twitch
                 }
             }
 
-            m_irc.Join("#" + channel);
             return twitchChannel;
         }
 
-        public async Task<TwitchChannel> JoinAsync(string channel)
+        public async void JoinAsync(string channel)
         {
-            TwitchChannel result = Join(channel);
+            TwitchChannel result = Create(channel);
 
             if (result.Connected)
-                return result;
+                return;
 
             await Task.Factory.StartNew(() =>
                 {
                     while (!result.Connected)
-                        Task.Delay(150);
+                        Thread.Sleep(150);
                 });
-
-            return result;
         }
 
 
@@ -105,23 +120,24 @@ namespace DarkAutumn.Twitch
             if (twitchChannel != null && twitchChannel.Name == channel)
                 return twitchChannel;
 
+            bool created = false;
             lock (m_channels)
-                m_channels.TryGetValue(channel, out twitchChannel);
+            {
+                if (!m_channels.TryGetValue(channel, out twitchChannel))
+                {
+                    twitchChannel = m_channels[channel] = new TwitchChannel(this, channel);
+                    created = true;
+                }
+            }
+
+            if (created)
+            {
+                var evt = ChannelCreated;
+                if (evt != null)
+                    evt(this, twitchChannel);
+            }
 
             s_lastChannel = twitchChannel;
-
-#if DEBUG
-            if (twitchChannel == null && IrcConnection.s_chanCreated != null)
-            {
-                twitchChannel = new TwitchChannel(this, channel);
-
-                lock (m_channels)
-                    m_channels[channel] = twitchChannel;
-
-                IrcConnection.s_chanCreated(twitchChannel);
-            }
-#endif
-
             return twitchChannel;
         }
 

@@ -28,6 +28,9 @@ namespace DarkAutumn.Twitch
         Encoding m_encoding = Encoding.UTF8;
         volatile bool m_shutdown = false;
 
+        object m_sync = new object();
+        DateTime m_lastEvent = DateTime.MinValue;
+
         byte[] m_buffer = new byte[1024];
         Stream m_stream = new CircularBufferStream(0x10000);
 
@@ -40,7 +43,18 @@ namespace DarkAutumn.Twitch
         Thread m_thread;
 
         SafeLineReader m_reader;
-        public static Action<TwitchChannel> s_chanCreated;
+
+        public DateTime LastEvent
+        {
+            get
+            {
+                DateTime result;
+                lock (m_sync)
+                    result = m_lastEvent;
+
+                return result;
+            }
+        }
 
         public IrcConnection(TwitchConnection twitch)
         {
@@ -116,6 +130,9 @@ namespace DarkAutumn.Twitch
 
         private void ReceiveCallback(IAsyncResult ar)
         {
+            lock (m_sync)
+                m_lastEvent = DateTime.UtcNow;
+
             try
             {
                 int read = m_socket.EndReceive(ar);
@@ -166,13 +183,13 @@ namespace DarkAutumn.Twitch
             }
         }
 
-        public static IEnumerable<string> TestInput(IEnumerable<string> lines, Action<TwitchChannel> chanCreated)
+        public static IEnumerable<string> TestInput(IEnumerable<string> lines, TwitchConnection.ChannelCreatedHandler chanCreated)
         {
-            s_chanCreated = chanCreated;
-
             List<string> errors = new List<string>();
 
             TwitchConnection twitch = new TwitchConnection();
+            twitch.ChannelCreated += chanCreated;
+
             IrcConnection conn = new IrcConnection(twitch);
             
             foreach (var line in lines)
@@ -193,7 +210,6 @@ namespace DarkAutumn.Twitch
                 }
             }
 
-            s_chanCreated = null;
             return errors;
         }
 
@@ -387,7 +403,7 @@ namespace DarkAutumn.Twitch
             SendAsync("JOIN {0}\n", channel);
         }
 
-        internal void Quit()
+        internal void Disconnect()
         {
             SendAsync("QUIT\n");
 
@@ -404,6 +420,11 @@ namespace DarkAutumn.Twitch
         internal void Send(string message)
         {
             SendAsync(message);
+        }
+
+        internal void Ping()
+        {
+            SendAsync("PING " + m_user + "\n");
         }
     }
 }

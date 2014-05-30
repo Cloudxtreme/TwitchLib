@@ -26,6 +26,7 @@ namespace DarkAutumn.Twitch
     {
         internal TwitchUserData UserData { get; set; }
 
+        public bool IsStreamer { get; internal set; }
         public bool IsModerator { get; internal set; }
         public bool IsSubscriber { get; internal set; }
 

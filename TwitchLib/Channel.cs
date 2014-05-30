@@ -10,6 +10,7 @@ namespace DarkAutumn.Twitch
 {
     public class TwitchChannel
     {
+        readonly string r_unban = ".unban ";
         readonly string r_ban = ".ban ";
         readonly string r_timeout = ".timeout ";
         readonly string r_action = new string((char)1, 1) + "ACTION";
@@ -63,9 +64,15 @@ namespace DarkAutumn.Twitch
 
         internal TwitchChannel(TwitchConnection twitch, string channel)
         {
+            channel = channel.ToLower();
+
             m_twitch = twitch;
             Name = channel;
             m_prvtMsg = string.Format("PRIVMSG #{0} :", channel);
+
+            var user = GetUser(channel);
+            user.IsStreamer = true;
+            user.IsModerator = true;
         }
 
         public override string ToString()
@@ -101,6 +108,17 @@ namespace DarkAutumn.Twitch
             var evt = MessageSent;
             if (evt != null && format[0] != '.')
                 evt(this, GetUser(m_twitch.User), message);
+        }
+
+        public void Unban(TwitchUser user)
+        {
+            StringBuilder sb = new StringBuilder(m_prvtMsg.Length + r_ban.Length + user.Name.Length + 1);
+            sb.Append(m_prvtMsg);
+            sb.Append(r_unban);
+            sb.Append(user.Name);
+            sb.Append('\n');
+
+            m_twitch.Send(sb.ToString());
         }
 
         public void Ban(TwitchUser user)
@@ -145,6 +163,11 @@ namespace DarkAutumn.Twitch
                 result = m_users[name] = new TwitchUser(data);
                 return result;
             }
+        }
+
+        public void Join()
+        {
+            m_twitch.Join("#" + Name);
         }
 
         public void Leave()
