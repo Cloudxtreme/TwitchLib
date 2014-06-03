@@ -18,6 +18,7 @@ namespace DarkAutumn.Twitch
 
         ManualResetEvent m_joined = new ManualResetEvent(false);
 
+        private bool m_modsRequested;
         TwitchConnection m_twitch;
 
         HashSet<TwitchUser> m_moderators = new HashSet<TwitchUser>();
@@ -211,6 +212,9 @@ namespace DarkAutumn.Twitch
 
         internal void NotifyJoined()
         {
+            m_modsRequested = true;
+            SendMessage(".mods");
+
             IsJoined = true;
             m_joined.Set();
         }
@@ -255,16 +259,15 @@ namespace DarkAutumn.Twitch
 
 
 
-        internal void ParseModerators(string text, int offset)
+        internal void ParseModerators(string text, int offset, int modOffset)
         {
-            // This room is now in slow mode. You may send messages every 120 seconds
             //*  The moderators of this room are: mod1, mod2, mod3
 
             lock (m_moderators)
             {
                 TwitchUser streamer = GetUser(Name);
 
-                string[] modList = text.Substring(offset).Split(new string[] { ", " }, StringSplitOptions.RemoveEmptyEntries);
+                string[] modList = text.Substring(modOffset).Split(new string[] { ", " }, StringSplitOptions.RemoveEmptyEntries);
                 HashSet<TwitchUser> mods = new HashSet<TwitchUser>(modList.Select(name => GetUser(name)));
                 mods.Add(streamer);
 
@@ -278,6 +281,11 @@ namespace DarkAutumn.Twitch
                 foreach (var former in demodded)
                     former.IsModerator = false;
             }
+
+            if (!m_modsRequested)
+                RawJtvMessage(text, offset);
+
+            m_modsRequested = false;
         }
 
 

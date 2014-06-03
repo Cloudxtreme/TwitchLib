@@ -228,7 +228,7 @@ namespace DarkAutumn.Twitch
                     string subModeOff = "This room is no longer in subscribers-only mode.";
 
                     if (text.StartsWith(modMsg, offset))
-                        chan.ParseModerators(text, offset + modMsg.Length);
+                        chan.ParseModerators(text, offset, offset + modMsg.Length);
                     else if (text.StartsWith(slowMode, offset))
                         chan.ParseSlowMode(slowMode, offset + slowMode.Length);
                     else if (text.StartsWith(slowOff, offset))
