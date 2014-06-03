@@ -95,22 +95,36 @@ namespace DarkAutumn.Twitch
 
             int paramCount = parameters != null ? parameters.Length : 0;
 
+
             StringBuilder sb = new StringBuilder(m_prvtMsg.Length + format.Length + paramCount * 8 + 1);
             sb.Append(m_prvtMsg);
 
+            // If we are going to raise a MessageSent event, be efficient with how we build and store the
+            // message here.
+            string rawMessage = format;
+            var messageSentEvent = MessageSent;
+
             if (paramCount == 0)
+            {
                 sb.Append(format);
+            }
+            else if (messageSentEvent != null)
+            {
+                rawMessage = string.Format(format, parameters);
+                sb.Append(rawMessage);
+            }
             else
+            {
                 sb.AppendFormat(format, parameters);
+            }
 
             sb.Append('\n');
 
             string message = sb.ToString();
             m_twitch.Send(message);
 
-            var evt = MessageSent;
-            if (evt != null && format[0] != '.')
-                evt(this, GetUser(m_twitch.User), message);
+            if (messageSentEvent != null && format[0] != '.')
+                messageSentEvent(this, GetUser(m_twitch.User), rawMessage);
         }
 
         public void Unban(TwitchUser user)
