@@ -318,6 +318,11 @@ namespace DarkAutumn.Twitch
                 var user = GetUserData(name);
                 user.IsAdmin = true;
             }
+            else if (text.EndsWith("staff"))
+            {
+                var user = GetUserData(name);
+                user.IsStaff = true;
+            }
             else
             {
                 Debug.Fail(string.Format("Parse SpecialMessage could not parse {0}", text));
