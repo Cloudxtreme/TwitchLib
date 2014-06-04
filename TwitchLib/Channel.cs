@@ -23,6 +23,7 @@ namespace DarkAutumn.Twitch
 
         HashSet<TwitchUser> m_moderators = new HashSet<TwitchUser>();
         Dictionary<string, TwitchUser> m_users = new Dictionary<string, TwitchUser>();
+        Dictionary<string, TwitchUser> m_active = new Dictionary<string, TwitchUser>();
         string m_prvtMsg;
 
         public delegate void ChannelEventHandler(TwitchChannel channel);
@@ -382,6 +383,20 @@ namespace DarkAutumn.Twitch
             var evt = SubModeEnd;
             if (evt != null)
                 evt(this);
+        }
+
+        internal void UserParted(string username)
+        {
+            var user = GetUser(username);
+
+            lock (m_active)
+                m_active[username] = user;
+        }
+
+        internal void UserJoined(string username)
+        {
+            lock (m_active)
+                m_active.Remove(username);
         }
     }
 }

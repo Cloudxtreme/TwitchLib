@@ -36,13 +36,24 @@ namespace DarkAutumn.Twitch
 
         TaskCompletionSource<ConnectResult> m_connectResult;
 
-        TwitchConnection m_twitch;
-
         BlockingCollection<string> m_queue = new BlockingCollection<string>(new ConcurrentQueue<string>());
         AutoResetEvent m_event = new AutoResetEvent(false);
         Thread m_thread;
 
         SafeLineReader m_reader;
+
+        public delegate void PartJoinHandler(string user, string channel);
+
+        public event PartJoinHandler UserJoined;
+        public event PartJoinHandler UserParted;
+
+        public delegate void MessageHandler(string channel, string user, string rawLine, int msgOffs);
+        public event MessageHandler MessageReceived;
+
+        public delegate void ModeratorHandler(string channel, string user);
+        public event ModeratorHandler ModeratorJoined;
+        public event ModeratorHandler ModeratorLeft;
+
 
         public DateTime LastEvent
         {
@@ -56,10 +67,9 @@ namespace DarkAutumn.Twitch
             }
         }
 
-        public IrcConnection(TwitchConnection twitch)
+        public IrcConnection()
         {
             m_reader = new SafeLineReader(new StreamReader(m_stream, m_encoding));
-            m_twitch = twitch;
         }
 
         public Task<ConnectResult> ConnectAsync(string hostName, int port, string user, string oauth)
@@ -190,7 +200,7 @@ namespace DarkAutumn.Twitch
             TwitchConnection twitch = new TwitchConnection();
             twitch.ChannelCreated += chanCreated;
 
-            IrcConnection conn = new IrcConnection(twitch);
+            IrcConnection conn = new IrcConnection();
             
             foreach (var line in lines)
             {
@@ -283,11 +293,11 @@ namespace DarkAutumn.Twitch
                     return true;
 
                 case "JOIN":
-                    m_twitch.NotifyJoined(line.Substring(args + 1));
+                    OnNotifyJoined(line, userStart, userEnd, args + 1);
                     return true;
 
                 case "PART":
-                    m_twitch.NotifyPart(line.Substring(args + 1));
+                    OnNotifyPart(line, userStart, userEnd, args + 1);
                     return true;
 
                 case "001":
@@ -313,8 +323,35 @@ namespace DarkAutumn.Twitch
             return false;
         }
 
+        private void OnNotifyPart(string line, int userStart, int userEnd, int channel)
+        {
+            var evt = UserParted;
+            if (evt != null)
+                evt(line.Slice(userStart, userEnd), line.Substring(channel));
+        }
+
+        private void OnNotifyJoined(string line, int userStart, int userEnd, int channel)
+        {
+            var evt = UserJoined;
+            if (evt != null)
+                evt(line.Slice(userStart, userEnd), line.Substring(channel));
+        }
+
+        bool OnMessage(string line, int userStart, int userEnd, int args)
+        {
+            var evt = MessageReceived;
+            if (evt == null)
+                return true;
+
+            return OnMessage(line.Slice(userStart, userEnd), line, args);
+        }
+
         private bool OnMessage(string user, string line, int args)
         {
+            var evt = MessageReceived;
+            if (evt == null)
+                return true;
+
             if (args >= line.Length)
                 return false;
 
@@ -326,7 +363,7 @@ namespace DarkAutumn.Twitch
             if (line[args] == '#')
                 channel = line.Slice(args+1, i);
 
-            m_twitch.NotifyMessageReceived(channel, user, line, i + 1);
+            evt(channel, user, line, i + 1);
             return true;
         }
 
@@ -343,7 +380,7 @@ namespace DarkAutumn.Twitch
             if (i == -1)
                 return false;
 
-            string channel = line.Slice(args, i);
+            int chanEnd = i;
             i++;
 
             if (i+3 >= line.Length)
@@ -353,13 +390,14 @@ namespace DarkAutumn.Twitch
             if (!joined && line[i] != '-')
                 return false;
 
+            var evt = joined ? ModeratorJoined : ModeratorLeft;
+            if (evt == null)
+                return true;
+
+            string channel = line.Slice(args, chanEnd);
             string user = line.Substring(i + 3);
 
-            if (joined)
-                m_twitch.NotifyModeratorJoined(channel, user);
-            else
-                m_twitch.NotifyModeratorLeft(channel, user);
-
+            evt(channel, user);
             return true;
         }
 

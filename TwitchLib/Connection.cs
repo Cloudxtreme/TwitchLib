@@ -14,6 +14,7 @@ namespace DarkAutumn.Twitch
         IrcConnection m_irc;
         Dictionary<string, TwitchChannel> m_channels = new Dictionary<string, TwitchChannel>();
         Dictionary<string, TwitchUserData> m_users = new Dictionary<string, TwitchUserData>();
+        HashSet<TwitchUser> m_activeUsers = new HashSet<TwitchUser>();
 
         volatile TwitchUserData m_lastUser;
 
@@ -26,7 +27,12 @@ namespace DarkAutumn.Twitch
 
         public TwitchConnection()
         {
-            m_irc = new IrcConnection(this);
+            m_irc = new IrcConnection();
+            m_irc.UserJoined += NotifyJoined;
+            m_irc.UserParted += NotifyPart;
+            m_irc.MessageReceived += NotifyMessageReceived;
+            m_irc.ModeratorJoined += NotifyModeratorJoined;
+            m_irc.ModeratorLeft += NotifyModeratorLeft;
         }
 
         internal TwitchUserData GetUserData(string name)
@@ -156,16 +162,23 @@ namespace DarkAutumn.Twitch
 
 
         #region Internal Callbacks
-        internal void NotifyJoined(string channel)
+        internal void NotifyJoined(string user, string channel)
         {
             TwitchChannel twitchChannel = GetChannel(channel);
             Debug.Assert(twitchChannel != null);
 
-            if (twitchChannel != null)
-                twitchChannel.NotifyJoined();
+            if (user == User)
+            {
+                if (twitchChannel != null)
+                    twitchChannel.NotifyJoined();
+            }
+            else
+            {
+                twitchChannel.UserJoined(user);
+            }
         }
 
-        internal void NotifyPart(string channel)
+        internal void NotifyPart(string user, string channel)
         {
             lock (m_channels)
             {
@@ -175,9 +188,16 @@ namespace DarkAutumn.Twitch
                     Debug.Fail("Parted channel not in dictionary.");
                     return;
                 }
-
-                twitchChannel.IsJoined = false;
-                m_channels.Remove(channel);
+                
+                if (user == User)
+                {
+                    twitchChannel.IsJoined = false;
+                    m_channels.Remove(channel);
+                }
+                else
+                {
+                    twitchChannel.UserParted(user);
+                }
             }
         }
 
