@@ -186,26 +186,34 @@ namespace DarkAutumn.Twitch
 
         public void Join()
         {
-            if (IsJoined)
-                throw new InvalidOperationException("Channel already joined.");
-            
-            m_joined.Reset();
-            m_twitch.Join("#" + Name);
+            JoinWoker();
             m_joined.WaitOne();
         }
 
         public async Task JoinAsync()
         {
+            JoinWoker();
+            await m_joined.AsTask();
+        }
+
+        private void JoinWoker()
+        {
             if (IsJoined)
                 throw new InvalidOperationException("Channel already joined.");
 
             m_joined.Reset();
             m_twitch.Join("#" + Name);
-            await m_joined.AsTask();
+            m_twitch.Connected += m_twitch_Connected;
+        }
+
+        void m_twitch_Connected()
+        {
+            m_twitch.Join("#" + Name);
         }
 
         public void Leave()
         {
+            m_twitch.Connected -= m_twitch_Connected;
             m_twitch.Leave(Name);
             m_twitch = null;
             IsJoined = false;

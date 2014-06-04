@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -47,6 +48,18 @@ namespace DarkAutumn.Twitch
                 end = self.Length + end;
 
             return self.Substring(start, end - start);
+        }
+    }
+
+    public static class NativeMethods
+    {
+        [DllImport("wininet.dll", SetLastError = true)]
+        extern static bool InternetGetConnectedState(out int lpdwFlags, int dwReserved);
+
+        public static bool IsConnectedToInternet()
+        {
+            int flags;
+            return InternetGetConnectedState(out flags, 0);
         }
     }
 }

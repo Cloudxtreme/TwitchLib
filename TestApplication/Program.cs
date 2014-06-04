@@ -16,7 +16,7 @@ namespace TestApplication
 
         static void Main(string[] a)
         {
-            Task<TwitchChannel[]> t = ConnectAsync("polt", "incontroltv", "darkautumn");
+            Task<TwitchChannel[]> t = ConnectAsync("darkautumn");
             t.Wait();
 
             TwitchChannel[] chans = t.Result;
@@ -37,7 +37,12 @@ namespace TestApplication
                 chan.UserSubscribed += chan_UserSubscribed;
             }
 
+            var connection = chans.First().Connection;
+            connection.Connected += () => Console.WriteLine("Connected");
+            connection.Disconnected += () => Console.WriteLine("Disconnected");
+
             DateTime lastSave = DateTime.Now;
+            Console.WriteLine("Started loop");
             while (Console.ReadKey().KeyChar != 'q')
             {
                 Thread.Sleep(250);
@@ -52,11 +57,10 @@ namespace TestApplication
                 }
             }
 
-            var connection = chans.First().Connection;
             foreach (var chan in chans)
                 chan.Leave();
 
-            connection.Disconnect();
+            connection.Quit();
 
             foreach (var file in m_files.Values)
                 lock (file)
@@ -65,11 +69,11 @@ namespace TestApplication
             Thread.Sleep(2000);
         }
 
-        static async Task<TwitchChannel[]> ConnectAsync(params string[] channels)
+        static async Task<TwitchChannel[]> ConnectAsync(params string[] channelNames)
         {
             TwitchConnection twitch = new TwitchConnection();
 
-            string[] loginData = File.ReadLines("login.txt").Take(3).ToArray();
+            string[] loginData = File.ReadLines("login.txt").Take(2).ToArray();
 
             var connectResult = await twitch.ConnectAsync(loginData[0], loginData[1]);
             if (connectResult != ConnectResult.Connected)
@@ -78,13 +82,21 @@ namespace TestApplication
                 return null;
             }
 
-            var channelTasks = (from channelName in channels select twitch.JoinAsync(channelName)).ToArray();
+            //TwitchChannel result = Create(channel);
+            //await result.JoinAsync();
+            //return result;
+
+
+
+            TwitchChannel[] channels = (from channelName in channelNames select twitch.Create(channelName)).ToArray();
+            Task[] channelTasks = (from channel in channels select channel.JoinAsync()).ToArray();
+
             var result = new TwitchChannel[channelTasks.Length];
 
             for (int i = 0; i < result.Length; ++i)
-                result[i] = await channelTasks[i];
+                await channelTasks[i];
 
-            return result;
+            return channels;
         }
 
         static void chan_UserSubscribed(TwitchChannel channel, TwitchUser user)
@@ -124,6 +136,8 @@ namespace TestApplication
             var file = m_files[channel];
             lock (file)
                 file.WriteLine("[{0}] {1}", DateTime.Now, fmt);
+
+            Console.WriteLine(fmt);
         }
     }
 }

@@ -22,11 +22,11 @@ namespace DarkAutumn.Twitch
     class IrcConnection
     {
         bool m_connected;
-        Socket m_socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        Socket m_socket;
         DnsEndPoint m_endpoint;
         string m_user, m_oauth;
         Encoding m_encoding = Encoding.UTF8;
-        volatile bool m_shutdown = false;
+        CancellationTokenSource m_shutdown = new CancellationTokenSource();
 
         object m_sync = new object();
         DateTime m_lastEvent = DateTime.MinValue;
@@ -42,18 +42,21 @@ namespace DarkAutumn.Twitch
 
         SafeLineReader m_reader;
 
+        public delegate void ModeratorHandler(string channel, string user);
+        public delegate void MessageHandler(string channel, string user, string rawLine, int msgOffs);
         public delegate void PartJoinHandler(string user, string channel);
+        public delegate void ConnectionHandler();
 
         public event PartJoinHandler UserJoined;
         public event PartJoinHandler UserParted;
 
-        public delegate void MessageHandler(string channel, string user, string rawLine, int msgOffs);
         public event MessageHandler MessageReceived;
 
-        public delegate void ModeratorHandler(string channel, string user);
         public event ModeratorHandler ModeratorJoined;
         public event ModeratorHandler ModeratorLeft;
 
+        public event ConnectionHandler Disconnected;
+        public event ConnectionHandler Connected;
 
         public DateTime LastEvent
         {
@@ -72,7 +75,7 @@ namespace DarkAutumn.Twitch
             m_reader = new SafeLineReader(new StreamReader(m_stream, m_encoding));
         }
 
-        public Task<ConnectResult> ConnectAsync(string hostName, int port, string user, string oauth)
+        public async Task<ConnectResult> ConnectAsync(string hostName, int port, string user, string oauth)
         {
             if (m_connected)
                 throw new InvalidOperationException("Already connected to twitch chat.");
@@ -81,35 +84,53 @@ namespace DarkAutumn.Twitch
             m_user = user;
             m_oauth = oauth;
 
-            var taskCompletion = new TaskCompletionSource<ConnectResult>();
-
-            m_socket.BeginConnect(m_endpoint, asyncResult =>
+            while (true)
+            {
+                try
                 {
-                    try
+                    while (!NativeMethods.IsConnectedToInternet())
+                        Thread.Sleep(5000);
+
+                    m_socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                    return await BeginSocketConnect();
+                }
+                catch (SocketException)
+                {
+                    Thread.Sleep(5000);
+                }
+            }
+        }
+
+        private async Task<ConnectResult> BeginSocketConnect()
+        {
+            var taskCompletion = new TaskCompletionSource<ConnectResult>();
+            m_socket.BeginConnect(m_endpoint, asyncResult =>
+            {
+                try
+                {
+                    m_connected = true;
+                    if (m_thread == null)
                     {
-                        m_connected = true;
-                        if (m_thread == null)
-                        {
-                            m_thread = new Thread(ProcessMessages);
-                            m_thread.Name = "Message Processor for User " + m_user;
-                            m_thread.Start();
-                        }
-
-                        string login = "PASS :{1}\nUSER {0} 0 * :{0}\nNICK :{0}\nTWITCHCLIENT 3\n";
-                        login = string.Format(login, m_user, m_oauth);
-
-                        m_connectResult = taskCompletion;
-
-                        SendAsync(login);
-                        ReceiveAsync();
+                        m_thread = new Thread(ProcessMessages);
+                        m_thread.Name = "Message Processor for User " + m_user;
+                        m_thread.Start();
                     }
-                    catch (Exception e)
-                    {
-                        taskCompletion.TrySetException(e);
-                    }
-                }, null);
 
-            return taskCompletion.Task;
+                    string login = "PASS :{1}\nUSER {0} 0 * :{0}\nNICK :{0}\nTWITCHCLIENT 3\n";
+                    login = string.Format(login, m_user, m_oauth);
+
+                    m_connectResult = taskCompletion;
+
+                    SendAsync(login);
+                    ReceiveAsync();
+                }
+                catch (Exception e)
+                {
+                    taskCompletion.TrySetException(e);
+                }
+            }, null);
+
+            return await taskCompletion.Task;
         }
 
         private void SendAsync(string value)
@@ -135,7 +156,8 @@ namespace DarkAutumn.Twitch
 
         private void ReceiveAsync()
         {
-            m_socket.BeginReceive(m_buffer, 0, m_buffer.Length, 0, new AsyncCallback(ReceiveCallback), null);
+            var socket = m_socket;
+            socket.BeginReceive(m_buffer, 0, m_buffer.Length, 0, new AsyncCallback(ReceiveCallback), socket);
         }
 
         private void ReceiveCallback(IAsyncResult ar)
@@ -145,7 +167,8 @@ namespace DarkAutumn.Twitch
 
             try
             {
-                int read = m_socket.EndReceive(ar);
+                Socket socket = (Socket)ar.AsyncState;
+                int read = socket.EndReceive(ar);
                 Log.Instance.LogBytesReceived(read);
 
                 if (read > 0)
@@ -163,34 +186,92 @@ namespace DarkAutumn.Twitch
                     ReceiveAsync();
                 }
             }
-            catch (SocketException e)
+            catch (ObjectDisposedException)
             {
-                Log.Instance.LogError(e.ToString());
-                Debug.Fail(e.ToString());
+            }
+            catch (SocketException)
+            {
             }
         }
 
         private void ProcessMessages()
         {
-            while (!m_shutdown)
+            bool pinged = false;
+            bool reconnecting = false;
+
+            var cancelToken = m_shutdown.Token;
+            try
             {
-                string line = m_queue.Take();
-
-                int userStart;
-                int userEnd;
-                string command;
-                int args;
-
-                if (ParseLine(line, out userStart, out userEnd, out command, out args))
+                while (!cancelToken.IsCancellationRequested)
                 {
-                    if (!ProcessCommand(line, userStart, userEnd, command, args))
-                        ReportError(line);
-                }
-                else
-                {
-                    ReportError(line);
+                    string line;
+                    if (m_queue.TryTake(out line, 30000, cancelToken))
+                    {
+                        pinged = false;
+                        reconnecting = false;
+
+                        int userStart;
+                        int userEnd;
+                        string command;
+                        int args;
+
+                        if (ParseLine(line, out userStart, out userEnd, out command, out args))
+                        {
+                            if (!ProcessCommand(line, userStart, userEnd, command, args))
+                                ReportError(line);
+                        }
+                        else
+                        {
+                            ReportError(line);
+                        }
+                    }
+                    else if (!reconnecting)
+                    {
+                        if (pinged || !NativeMethods.IsConnectedToInternet())
+                        {
+                            reconnecting = true;
+                            Reconnect();
+                        }
+                        else
+                        {
+                            pinged = true;
+                            Ping();
+                        }
+                    }
                 }
             }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
+        private async Task Reconnect()
+        {
+            m_socket.Close(1000);
+            var evt = Disconnected;
+            if (evt != null)
+                evt();
+
+            while (true)
+            {
+                try
+                {
+                    while (!NativeMethods.IsConnectedToInternet())
+                        Thread.Sleep(5000);
+
+                    m_socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                    await BeginSocketConnect();
+                    break;
+                }
+                catch (SocketException)
+                {
+                    Thread.Sleep(5000);
+                }
+            }
+
+            evt = Connected;
+            if (evt != null)
+                evt();
         }
 
         public static IEnumerable<string> TestInput(IEnumerable<string> lines, TwitchConnection.ChannelCreatedHandler chanCreated)
@@ -284,6 +365,7 @@ namespace DarkAutumn.Twitch
                     else
                         return OnMessage(line.Slice(userStart, userEnd), line, args);
 
+
                 case "MODE":
                     return OnMode(line, args);
 
@@ -292,13 +374,16 @@ namespace DarkAutumn.Twitch
                     OnPing(line.Substring(args + 1));
                     return true;
 
+
                 case "JOIN":
                     OnNotifyJoined(line, userStart, userEnd, args + 1);
                     return true;
 
+
                 case "PART":
                     OnNotifyPart(line, userStart, userEnd, args + 1);
                     return true;
+
 
                 case "001":
                     if (m_connectResult != null)
@@ -445,7 +530,7 @@ namespace DarkAutumn.Twitch
         {
             SendAsync("QUIT\n");
 
-            m_shutdown = true;
+            m_shutdown.Cancel();
         }
 
         internal void Part(string channel)

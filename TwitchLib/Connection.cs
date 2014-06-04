@@ -19,7 +19,11 @@ namespace DarkAutumn.Twitch
         volatile TwitchUserData m_lastUser;
 
         public delegate void ChannelCreatedHandler(TwitchConnection connection, TwitchChannel channel);
+        public delegate void ConnectionHandler();
+
         public event ChannelCreatedHandler ChannelCreated;
+        public event ConnectionHandler Connected;
+        public event ConnectionHandler Disconnected;
 
         public DateTime LastEvent { get { return m_irc.LastEvent; } }
 
@@ -33,6 +37,22 @@ namespace DarkAutumn.Twitch
             m_irc.MessageReceived += NotifyMessageReceived;
             m_irc.ModeratorJoined += NotifyModeratorJoined;
             m_irc.ModeratorLeft += NotifyModeratorLeft;
+            m_irc.Disconnected += m_irc_disconnected;
+            m_irc.Connected += m_irc_connected;
+        }
+
+        private void m_irc_connected()
+        {
+            var evt = Connected;
+            if (evt != null)
+                evt();
+        }
+
+        private void m_irc_disconnected()
+        {
+            var evt = Disconnected;
+            if (evt != null)
+                evt();
         }
 
         internal TwitchUserData GetUserData(string name)
@@ -101,21 +121,6 @@ namespace DarkAutumn.Twitch
 
             return twitchChannel;
         }
-
-        public async void JoinAsync(string channel)
-        {
-            TwitchChannel result = Create(channel);
-
-            if (result.IsJoined)
-                return;
-
-            await Task.Factory.StartNew(() =>
-                {
-                    while (!result.IsJoined)
-                        Thread.Sleep(150);
-                });
-        }
-
 
         static volatile TwitchChannel s_lastChannel;
         public TwitchChannel GetChannel(string channel)
