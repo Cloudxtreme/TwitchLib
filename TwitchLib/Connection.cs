@@ -122,12 +122,12 @@ namespace DarkAutumn.Twitch
             return twitchChannel;
         }
 
-        static volatile TwitchChannel s_lastChannel;
+        volatile TwitchChannel m_lastChannel;
         public TwitchChannel GetChannel(string channel)
         {
             channel = channel.ToLower();
 
-            var twitchChannel = s_lastChannel;
+            var twitchChannel = m_lastChannel;
             if (twitchChannel != null && twitchChannel.Name == channel)
                 return twitchChannel;
 
@@ -148,7 +148,7 @@ namespace DarkAutumn.Twitch
                     evt(this, twitchChannel);
             }
 
-            s_lastChannel = twitchChannel;
+            m_lastChannel = twitchChannel;
             return twitchChannel;
         }
 

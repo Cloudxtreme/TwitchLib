@@ -215,12 +215,13 @@ namespace DarkAutumn.Twitch
         {
             m_twitch.Connected -= m_twitch_Connected;
             m_twitch.Leave(Name);
-            m_twitch = null;
             IsJoined = false;
         }
 
         internal void NotifyJoined()
         {
+            Debug.Assert(!IsJoined);
+
             m_modsRequested = true;
             SendMessage(".mods");
 
