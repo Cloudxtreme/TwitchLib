@@ -330,7 +330,7 @@ namespace DarkAutumn.Twitch
         }
 
 
-        private void ParseUserColor(string text, int offset)
+        private bool ParseUserColor(string text, int offset)
         {
             //USERCOLOR username #8A2BE2
 
@@ -338,25 +338,34 @@ namespace DarkAutumn.Twitch
             if (!text.StartsWith(usercolor, offset))
             {
                 Debug.Fail(string.Format("Could not parse user color {0}", text));
-                return;
+                return false;
             }
 
             offset += usercolor.Length;
             if (offset + 3 >= text.Length)
             {
                 Debug.Fail(string.Format("Could not parse user color {0}", text));
-                return;
+                return false;
             }
 
             int i = text.IndexOf(' ', offset);
-            if (text[i + 1] != '#')
+            var user = GetUserData(text.Slice(offset, i));
+            if (text[i + 1] == '#')
             {
-                Debug.Fail(string.Format("Could not parse user color {0}", text));
-                return;
+                user.Color = text.Substring(i + 1);
+                return true;
             }
 
-            var user = GetUserData(text.Slice(offset, i));
-            user.Color = text.Substring(i + 1);
+            string color = text.Substring(i + 1);
+            switch (color)
+            {
+                case "black":
+                    user.Color = "#000000";
+                    return true;
+            }
+
+            Debug.Fail(string.Format("Could not parse user color {0}", text));
+            return false;
         }
 
         private void ParseEmoteSet(string text, int offset)
