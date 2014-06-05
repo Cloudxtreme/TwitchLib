@@ -96,6 +96,7 @@ namespace DarkAutumn.Twitch
                 }
                 catch (SocketException)
                 {
+                    Log.Irc.ConnectionFailed();
                     Thread.Sleep(5000);
                 }
             }
@@ -116,12 +117,10 @@ namespace DarkAutumn.Twitch
                         m_thread.Start();
                     }
 
-                    string login = "PASS :{1}\nUSER {0} 0 * :{0}\nNICK :{0}\nTWITCHCLIENT 3\n";
-                    login = string.Format(login, m_user, m_oauth);
 
                     m_connectResult = taskCompletion;
 
-                    SendAsync(login);
+                    SendLogin(m_user, m_oauth, 3);
                     ReceiveAsync();
                 }
                 catch (Exception e)
@@ -131,6 +130,19 @@ namespace DarkAutumn.Twitch
             }, null);
 
             return await taskCompletion.Task;
+        }
+
+        private void SendLogin(string user, string oauth, int client)
+        {
+            string login = string.Format("PASS :{1}\nUSER {0} 0 * :{0}\nNICK :{0}\nTWITCHCLIENT {2}\n", user, oauth, client);
+
+            byte[] bytes = m_encoding.GetBytes(login);
+
+            var args = new SocketAsyncEventArgs();
+            args.SetBuffer(bytes, 0, bytes.Length);
+
+            m_socket.SendAsync(args);
+            Log.Irc.LoginSent(user, client);
         }
 
         private void SendAsync(string value)
@@ -143,7 +155,7 @@ namespace DarkAutumn.Twitch
             args.SetBuffer(bytes, 0, bytes.Length);
 
             m_socket.SendAsync(args);
-            Log.Instance.LogSend(value);
+            Log.Irc.MessageSent(value);
         }
 
         private void SendAsync(string format, params object[] args)
@@ -169,7 +181,6 @@ namespace DarkAutumn.Twitch
             {
                 Socket socket = (Socket)ar.AsyncState;
                 int read = socket.EndReceive(ar);
-                Log.Instance.LogBytesReceived(read);
 
                 if (read > 0)
                 {
@@ -179,7 +190,7 @@ namespace DarkAutumn.Twitch
                     List<string> result = new List<string>();
                     while ((line = m_reader.ReadLine()) != null)
                     {
-                        Log.Instance.LogRecv(line);
+                        Log.Irc.MessageReceived(line);
                         m_queue.Add(line);
                     }
 
@@ -218,15 +229,17 @@ namespace DarkAutumn.Twitch
                         if (ParseLine(line, out userStart, out userEnd, out command, out args))
                         {
                             if (!ProcessCommand(line, userStart, userEnd, command, args))
-                                ReportError(line);
+                                Log.Irc.CommandFailure(command, line);
                         }
                         else
                         {
-                            ReportError(line);
+                            Log.Irc.ParseFailure(line);
                         }
                     }
                     else if (!reconnecting)
                     {
+                        Log.Irc.Timeout();
+
                         if (pinged || !NativeMethods.IsConnectedToInternet())
                         {
                             reconnecting = true;
@@ -247,6 +260,8 @@ namespace DarkAutumn.Twitch
 
         private async Task Reconnect()
         {
+            Log.Irc.Disconnected();
+
             m_socket.Close(1000);
             var evt = Disconnected;
             if (evt != null)
@@ -265,10 +280,12 @@ namespace DarkAutumn.Twitch
                 }
                 catch (SocketException)
                 {
+                    Log.Irc.ConnectionFailed();
                     Thread.Sleep(5000);
                 }
             }
 
+            Log.Irc.Connected();
             evt = Connected;
             if (evt != null)
                 evt();
@@ -512,11 +529,6 @@ namespace DarkAutumn.Twitch
             }
 
             return false;
-        }
-
-        private void ReportError(string line)
-        {
-            Log.Instance.LogError(string.Format("Error: {0}", line));
         }
 
         internal void Join(string channel)

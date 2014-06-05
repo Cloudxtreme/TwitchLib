@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -8,54 +9,84 @@ using System.Threading.Tasks;
 
 namespace DarkAutumn.Twitch
 {
-    class Log
+    [EventSource(Name="TwitchLib-Irc")]
+    class IrcLog : EventSource
     {
-        public static Log Instance = new Log();
-
-        StreamWriter m_file;
-
-        Log()
+        public class Keywords
         {
-            m_file = File.AppendText("log.txt");
+            public const EventKeywords IrcData = (EventKeywords)0x1;
+            public const EventKeywords Status = (EventKeywords)0x2;
+            public const EventKeywords Error = (EventKeywords)0x3;
         }
 
-        public void LogSend(string value)
+        internal IrcLog()
         {
-            lock (m_file)
-            {
-                m_file.Write("[{0}] <<< {1}", DateTime.Now, value);
-                m_file.Flush();
-            }
         }
 
-        public void LogRecv(string value)
+        [Event(1, Keywords = Keywords.IrcData, Opcode = EventOpcode.Send)]
+        public void MessageSent(string value)
         {
-            if (!value.EndsWith("\n"))
-                value += "\n";
-
-            lock (m_file)
-            {
-                m_file.Write("[{0}, t={1}] >>> {2}", DateTime.Now, Thread.CurrentThread.ManagedThreadId, value);
-                m_file.Flush();
-            }
+            bool isEnabled = IsEnabled();
+            WriteEvent(1, value);
         }
 
-        public void LogBytesReceived(int len)
+        [Event(2, Keywords = Keywords.IrcData, Opcode = EventOpcode.Receive)]
+        public void MessageReceived(string value)
         {
-            lock (m_file)
-            {
-                m_file.WriteLine("[{0}, t={1}] bytes {2}", DateTime.Now, Thread.CurrentThread.ManagedThreadId, len);
-                m_file.Flush();
-            }
+            WriteEvent(2, value);
         }
 
-        internal void LogError(string str)
+        [Event(3, Keywords = Keywords.Status, Opcode = EventOpcode.Info)]
+        public void Timeout()
         {
-            lock (m_file)
-            {
-                m_file.Write("[{0}, t={1}] ERROR {2}", DateTime.Now, Thread.CurrentThread.ManagedThreadId, str);
-                m_file.Flush();
-            }
+            WriteEvent(3);
         }
+
+        [Event(4, Keywords = Keywords.Status, Opcode = EventOpcode.Info)]
+        public void Disconnected()
+        {
+            WriteEvent(4);
+        }
+
+        [Event(5, Keywords = Keywords.Status, Opcode = EventOpcode.Info)]
+        public void Connected()
+        {
+            WriteEvent(5);
+        }
+
+        [Event(6, Keywords = Keywords.Status, Opcode = EventOpcode.Info)]
+        public void ConnectionFailed()
+        {
+            WriteEvent(6);
+        }
+
+        [Event(7, Keywords = Keywords.Error, Opcode = EventOpcode.Info)]
+        public void ParseFailure(string input)
+        {
+            WriteEvent(6, input);
+        }
+
+        [Event(8, Keywords = Keywords.Error, Opcode = EventOpcode.Info)]
+        public void CommandFailure(string command, string line)
+        {
+            WriteEvent(7, command, line);
+        }
+
+        [Event(8, Keywords = Keywords.IrcData, Opcode = EventOpcode.Send)]
+        public void LoginSent(string user, int client)
+        {
+            WriteEvent(8, user, client);
+        }
+    }
+
+    [EventSource(Name = "TwitchLib-Http")]
+    class HttpLog
+    {
+    }
+
+    static class Log
+    {
+        public static IrcLog Irc = new IrcLog();
+        public static HttpLog Http = new HttpLog();
     }
 }
