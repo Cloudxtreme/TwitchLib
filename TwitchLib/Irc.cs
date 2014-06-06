@@ -24,6 +24,7 @@ namespace DarkAutumn.Twitch
         bool m_connected;
         Socket m_socket;
         DnsEndPoint m_endpoint;
+        ClientType m_clientType;
         string m_user, m_oauth;
         Encoding m_encoding = Encoding.UTF8;
         CancellationTokenSource m_shutdown = new CancellationTokenSource();
@@ -70,9 +71,10 @@ namespace DarkAutumn.Twitch
             }
         }
 
-        public IrcConnection()
+        public IrcConnection(ClientType clientType)
         {
             m_reader = new SafeLineReader(new StreamReader(m_stream, m_encoding));
+            m_clientType = clientType;
         }
 
         public async Task<ConnectResult> ConnectAsync(string hostName, int port, string user, string oauth)
@@ -120,7 +122,7 @@ namespace DarkAutumn.Twitch
 
                     m_connectResult = taskCompletion;
 
-                    SendLogin(m_user, m_oauth, 3);
+                    SendLogin(m_user, m_oauth);
                     ReceiveAsync();
                 }
                 catch (Exception e)
@@ -132,9 +134,10 @@ namespace DarkAutumn.Twitch
             return await taskCompletion.Task;
         }
 
-        private void SendLogin(string user, string oauth, int client)
+        private void SendLogin(string user, string oauth)
         {
-            string login = string.Format("PASS :{1}\nUSER {0} 0 * :{0}\nNICK :{0}\nTWITCHCLIENT {2}\n", user, oauth, client);
+            string twitchClient = m_clientType == ClientType.Full ? "TWITCHCLIENT 3\n" : "";
+            string login = string.Format("PASS :{1}\nUSER {0} 0 * :{0}\nNICK :{0}\n{2}", user, oauth, twitchClient);
 
             byte[] bytes = m_encoding.GetBytes(login);
 
@@ -142,7 +145,7 @@ namespace DarkAutumn.Twitch
             args.SetBuffer(bytes, 0, bytes.Length);
 
             m_socket.SendAsync(args);
-            Log.Irc.LoginSent(user, client);
+            Log.Irc.LoginSent(user, m_clientType == ClientType.ChatOnly ? 0 : 3);
         }
 
         private void SendAsync(string value)
@@ -258,7 +261,7 @@ namespace DarkAutumn.Twitch
             }
         }
 
-        private async Task Reconnect()
+        private async void Reconnect()
         {
             Log.Irc.Disconnected();
 
@@ -295,10 +298,10 @@ namespace DarkAutumn.Twitch
         {
             List<string> errors = new List<string>();
 
-            TwitchConnection twitch = new TwitchConnection();
+            TwitchConnection twitch = new TwitchConnection(ClientType.Full);
             twitch.ChannelCreated += chanCreated;
 
-            IrcConnection conn = new IrcConnection();
+            IrcConnection conn = new IrcConnection(ClientType.Full);
             
             foreach (var line in lines)
             {

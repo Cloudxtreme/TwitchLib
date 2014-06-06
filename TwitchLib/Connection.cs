@@ -9,6 +9,12 @@ using System.Threading;
 
 namespace DarkAutumn.Twitch
 {
+    public enum ClientType
+    {
+        ChatOnly,
+        Full
+    }
+
     public class TwitchConnection
     {
         IrcConnection m_irc;
@@ -33,9 +39,10 @@ namespace DarkAutumn.Twitch
 
         public string User { get; private set; }
 
-        public TwitchConnection()
+
+        public TwitchConnection(ClientType client)
         {
-            m_irc = new IrcConnection();
+            m_irc = new IrcConnection(client);
             m_irc.UserJoined += NotifyJoined;
             m_irc.UserParted += NotifyPart;
             m_irc.MessageReceived += NotifyMessageReceived;
