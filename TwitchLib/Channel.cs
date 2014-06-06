@@ -264,7 +264,7 @@ namespace DarkAutumn.Twitch
             {
                 var evt = ActionReceived;
                 if (evt != null)
-                    evt(this, GetUser(username), line.Substring(offset));
+                    evt(this, GetUser(username), line.Substring(offset + r_action.Length));
             }
             else
             {
