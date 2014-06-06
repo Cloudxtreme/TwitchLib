@@ -67,6 +67,8 @@ namespace DarkAutumn.Twitch
         public bool IsJoined { get; internal set; }
         public string Name { get; private set; }
 
+        public TwitchUser User { get; private set; }
+
         internal TwitchChannel(TwitchConnection twitch, string channel)
         {
             channel = channel.ToLower();
@@ -78,6 +80,8 @@ namespace DarkAutumn.Twitch
             var user = GetUser(channel);
             user.IsStreamer = true;
             user.IsModerator = true;
+
+            User = GetUser(m_twitch.User);
         }
 
         public override string ToString()
@@ -85,15 +89,15 @@ namespace DarkAutumn.Twitch
             return Name;
         }
 
-        public void SendMessage(string message)
+        public bool SendMessage(string message)
         {
-            SendMessage(message, null);
+            return SendMessage(message, null);
         }
 
-        public void SendMessage(string format, params object[] parameters)
+        public bool SendMessage(string format, params object[] parameters)
         {
             if (format.Length == 0)
-                return;
+                return true;
 
             int paramCount = parameters != null ? parameters.Length : 0;
 
@@ -123,13 +127,16 @@ namespace DarkAutumn.Twitch
             sb.Append('\n');
 
             string message = sb.ToString();
-            m_twitch.Send(message);
+            if (!m_twitch.Send(User, message))
+                return false;
 
             if (messageSentEvent != null && format[0] != '.')
                 messageSentEvent(this, GetUser(m_twitch.User), rawMessage);
+
+            return true;
         }
 
-        public void Unban(TwitchUser user)
+        public bool Unban(TwitchUser user)
         {
             StringBuilder sb = new StringBuilder(m_prvtMsg.Length + r_ban.Length + user.Name.Length + 1);
             sb.Append(m_prvtMsg);
@@ -137,10 +144,10 @@ namespace DarkAutumn.Twitch
             sb.Append(user.Name);
             sb.Append('\n');
 
-            m_twitch.Send(sb.ToString());
+            return m_twitch.Send(User, sb.ToString());
         }
 
-        public void Ban(TwitchUser user)
+        public bool Ban(TwitchUser user)
         {
             StringBuilder sb = new StringBuilder(m_prvtMsg.Length + r_ban.Length + user.Name.Length + 1);
             sb.Append(m_prvtMsg);
@@ -148,10 +155,10 @@ namespace DarkAutumn.Twitch
             sb.Append(user.Name);
             sb.Append('\n');
 
-            m_twitch.Send(sb.ToString());
+            return m_twitch.Send(User, sb.ToString());
         }
 
-        public void Timeout(TwitchUser user, int duration)
+        public bool Timeout(TwitchUser user, int duration)
         {
             if (duration <= 0)
                 throw new ArgumentException("duration must be 1 or greater");
@@ -164,7 +171,7 @@ namespace DarkAutumn.Twitch
             sb.Append(duration);
             sb.Append('\n');
 
-            m_twitch.Send(sb.ToString());
+            return m_twitch.Send(User, sb.ToString());
         }
 
 

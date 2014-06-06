@@ -16,7 +16,11 @@ namespace DarkAutumn.Twitch
         Dictionary<string, TwitchUserData> m_users = new Dictionary<string, TwitchUserData>();
         HashSet<TwitchUser> m_activeUsers = new HashSet<TwitchUser>();
 
+        MessageRateLimiter m_messageLimiter = new MessageRateLimiter();
+        JoinRateLimiter m_joinLimiter = new JoinRateLimiter();
+
         volatile TwitchUserData m_lastUser;
+        volatile TwitchChannel m_lastChannel;
 
         public delegate void ChannelCreatedHandler(TwitchConnection connection, TwitchChannel channel);
         public delegate void ConnectionHandler();
@@ -91,15 +95,36 @@ namespace DarkAutumn.Twitch
             m_irc.Part("#" + name);
         }
 
-        internal void Send(string message)
+
+
+        internal bool Send(TwitchUser user, string message)
         {
-            m_irc.Send(message);
+            if (m_messageLimiter.CanSendMessage(user.IsModerator))
+            {
+                m_irc.Send(message);
+                return true;
+            }
+
+            return false;
         }
 
 
         internal void Join(string name)
         {
-            m_irc.Join(name);
+            int delay;
+            if (m_joinLimiter.CanJoin(out delay))
+                m_irc.Join(name);
+            else
+                ThreadPool.QueueUserWorkItem(JoinLater, new Tuple<string, int>(name, delay));
+        }
+
+        private void JoinLater(object state)
+        {
+            var param = (Tuple<string, int>)state;
+            int delay = param.Item2 >= 1 ? param.Item2 : 1;
+
+            Thread.Sleep(delay);
+            Join(param.Item1);
         }
 
         public TwitchChannel Create(string channel)
@@ -122,7 +147,6 @@ namespace DarkAutumn.Twitch
             return twitchChannel;
         }
 
-        volatile TwitchChannel m_lastChannel;
         public TwitchChannel GetChannel(string channel)
         {
             channel = channel.ToLower();
