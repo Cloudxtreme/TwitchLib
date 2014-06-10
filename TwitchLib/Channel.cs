@@ -31,6 +31,7 @@ namespace DarkAutumn.Twitch
         public delegate void MessageHandler(TwitchChannel channel, TwitchUser user, string text);
         public delegate void SlowModeHandler(TwitchChannel channel, int time);
         public delegate void StatusMessageHandler(TwitchChannel channel, string text);
+        public delegate void UsersEventHandler(TwitchChannel channel, TwitchUser[] users);
 
         public event StatusMessageHandler StatusMessageReceived;
 
@@ -52,6 +53,7 @@ namespace DarkAutumn.Twitch
         public event ChannelEventHandler ChatCleared;
 
         public event MessageHandler MessageSent;
+        public event UsersEventHandler ModListReceived;
 
         public TwitchUser[] Moderators
         {
@@ -280,12 +282,13 @@ namespace DarkAutumn.Twitch
         {
             //*  The moderators of this room are: mod1, mod2, mod3
 
+            HashSet<TwitchUser> mods;
             lock (m_moderators)
             {
                 TwitchUser streamer = GetUser(Name);
 
                 string[] modList = text.Substring(modOffset).Split(new string[] { ", " }, StringSplitOptions.RemoveEmptyEntries);
-                HashSet<TwitchUser> mods = new HashSet<TwitchUser>(modList.Select(name => GetUser(name)));
+                mods = new HashSet<TwitchUser>(modList.Select(name => GetUser(name)));
                 mods.Add(streamer);
 
                 foreach (var mod in mods)
@@ -298,6 +301,10 @@ namespace DarkAutumn.Twitch
                 foreach (var former in demodded)
                     former.IsModerator = false;
             }
+
+            var evt = ModListReceived;
+            if (evt != null)
+                evt(this, mods.ToArray());
 
             if (!m_modsRequested)
                 RawJtvMessage(text, offset);
